@@ -149,9 +149,9 @@ fn go_simulate_game_multi(state: &mut GameState, multi_score: &mut MultiScore, t
         } else {
             go_simulate_game_multi(state, multi_score, times_acc * times);
         }
-
-        state.positions[player] = position;
-        state.scores[player] = score;
-        state.next_player = player;
     }
+
+    state.positions[player] = position;
+    state.scores[player] = score;
+    state.next_player = player;
 }
