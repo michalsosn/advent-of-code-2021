@@ -39,12 +39,6 @@ impl Cube {
         x_span * y_span * z_span
     }
 
-    fn subsumes(&self, other: &Self) -> bool {
-        self.x_a <= other.x_a && other.x_b <= self.x_b &&
-            self.y_a <= other.y_a && other.y_b <= self.y_b &&
-            self.z_a <= other.z_a && other.z_b <= self.z_b
-    }
-
     fn cut_to(&self, other: &Self) -> Option<Cube> {
         let cube = Cube {
             x_a: cmp::max(self.x_a, other.x_a),
@@ -127,7 +121,7 @@ fn count_on(operations: &[Operation], background_cube: &Cube) -> u64 {
 }
 
 fn calculate_disjoint_operations(operations: &[Operation], background_cube: &Cube) -> Vec<Operation> {
-    // cubes in this vec are always disjoint and cut to truth_cube
+    // cubes in this vec are always disjoint and cut to background_cube
     let mut disjoint_ops: Vec<Operation> = Vec::new();
     disjoint_ops.push(Operation { value: false, cube: background_cube.clone() });
 
@@ -136,23 +130,16 @@ fn calculate_disjoint_operations(operations: &[Operation], background_cube: &Cub
         let mut new_ops: Vec<Operation> = Vec::new();
 
         for (i, old_op) in disjoint_ops.iter().enumerate() {
+            if op.value == old_op.value {
+                continue;
+            }
             match op.cube.cut_to(&old_op.cube) {
                 None => {},
                 Some(cut_cube) => {
-                    // cut_cube.subsumed(old_op.cube) is always true after a cut
-                    if op.value == old_op.value {
-                        // pass
-                    }
-                    else if cut_cube.subsumes(&old_op.cube) {
-                        keep[i] = false;
-                        new_ops.push(Operation { value: op.value, cube: cut_cube })
-                    }
-                    else {  // !cut_cube.subsumes(old_op.cube) && op.value != old_op.value
-                        keep[i] = false;
-                        let cut_op = Operation { value: op.value, cube: cut_cube };
-                        let mut result = split_ops(&cut_op, &old_op);
-                        new_ops.append(&mut result);
-                    }
+                    keep[i] = false;
+                    let cut_op = Operation { value: op.value, cube: cut_cube };
+                    let mut result = split_ops(&cut_op, &old_op);
+                    new_ops.append(&mut result);
                 }
             }
         }
