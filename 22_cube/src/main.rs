@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::cmp;
 use std::io;
 use std::io::BufRead;
 
@@ -11,9 +12,9 @@ fn main() {
     let on_count = count_on(operations.as_slice(), &limited_cube);
     println!("on_count in {:?} = {}", limited_cube, on_count);
 
-    let cube = find_cube(operations.as_slice());
-    let on_count = count_on(operations.as_slice(), &cube);
-    println!("on_count in {:?} = {}", cube, on_count);
+    let background_cube = find_background_cube(operations.as_slice());
+    let on_count = count_on(operations.as_slice(), &background_cube);
+    println!("on_count in {:?} = {}", background_cube, on_count);
 }
 
 #[derive(Debug,Clone)]
@@ -27,16 +28,15 @@ struct Cube {
 }
 
 impl Cube {
-    fn contains(&self, x: i32, y: i32, z: i32) -> bool {
-        self.x_a <= x && x <= self.x_b &&
-            self.y_a <= y && y <= self.y_b &&
-            self.z_a <= z && z <= self.z_b
+    fn is_empty(&self) -> bool {
+        self.x_a > self.x_b || self.y_a > self.y_b || self.z_a > self.z_b
     }
 
-    fn intersects(&self, other: &Self) -> bool {
-        self.x_b >= other.x_a && self.x_a <= other.x_b &&
-            self.y_b >= other.y_a && self.y_a <= other.y_b &&
-            self.z_b >= other.z_a && self.z_a <= other.z_b
+    fn size(&self) -> u64 {
+        let x_span = (self.x_b - self.x_a + 1) as u64;
+        let y_span = (self.y_b - self.y_a + 1) as u64;
+        let z_span = (self.z_b - self.z_a + 1) as u64;
+        x_span * y_span * z_span
     }
 
     fn subsumes(&self, other: &Self) -> bool {
@@ -45,22 +45,20 @@ impl Cube {
             self.z_a <= other.z_a && other.z_b <= self.z_b
     }
 
-    fn subsumed(&self, other: &Self) -> bool {
-        other.subsumes(self)
-    }
-
-    fn size(&self) -> u64 {
-        let x_span = (self.x_b - self.x_a) as u64;
-        let y_span = (self.y_b - self.y_a) as u64;
-        let z_span = (self.z_b - self.z_a) as u64;
-        x_span * y_span * z_span
-    }
-
-    // assuming the Cubes intersect, but does not subsume each other
-    fn split(&self, other: &Self) -> bool {
-        self.x_a <= other.x_a && other.x_b <= self.x_b &&
-            self.y_a <= other.y_a && other.y_b <= self.y_b &&
-            self.z_a <= other.z_a && other.z_b <= self.z_b
+    fn cut_to(&self, other: &Self) -> Option<Cube> {
+        let cube = Cube {
+            x_a: cmp::max(self.x_a, other.x_a),
+            x_b: cmp::min(self.x_b, other.x_b),
+            y_a: cmp::max(self.y_a, other.y_a),
+            y_b: cmp::min(self.y_b, other.y_b),
+            z_a: cmp::max(self.z_a, other.z_a),
+            z_b: cmp::min(self.z_b, other.z_b),
+        };
+        if cube.is_empty() {
+            None
+        } else {
+            Some(cube)
+        }
     }
 }
 
@@ -105,42 +103,7 @@ impl Input {
     }
 }
 
-fn count_on(operations: &[Operation], cube: &Cube) -> u64 {
-    let operations_last_first: Vec<Operation> = preprocess_operations(operations, cube);
-
-    let mut count: u64 = 0;
-    for z in cube.z_a..=cube.z_b {
-        for y in cube.y_a..=cube.y_b {
-            for x in cube.x_a..=cube.x_b {
-                let value = find_first_value(x, y, z, operations_last_first.as_slice());
-                if value {
-                    count += 1;
-                }
-            }
-        }
-    }
-    count
-}
-
-fn preprocess_operations(operations: &[Operation], cube: &Cube) -> Vec<Operation> {
-    let mut operations_last_first: Vec<Operation> = operations.into_iter()
-        .filter(|op| op.cube.intersects(cube))
-        .cloned()
-        .collect();
-    operations_last_first.reverse();
-    operations_last_first
-}
-
-fn find_first_value(x: i32, y: i32, z: i32, operations_last_first: &[Operation]) -> bool {
-    for op in operations_last_first {
-        if op.cube.contains(x, y, z) {
-            return op.value;
-        }
-    }
-    return false;
-}
-
-fn find_cube(operations: &[Operation]) -> Cube {
+fn find_background_cube(operations: &[Operation]) -> Cube {
     Cube {
         x_a: operations.iter().filter(|op| op.value).map(|op| op.cube.x_a).min().unwrap(),
         x_b: operations.iter().filter(|op| op.value).map(|op| op.cube.x_b).max().unwrap(),
@@ -149,4 +112,103 @@ fn find_cube(operations: &[Operation]) -> Cube {
         z_a: operations.iter().filter(|op| op.value).map(|op| op.cube.z_a).min().unwrap(),
         z_b: operations.iter().filter(|op| op.value).map(|op| op.cube.z_b).max().unwrap(),
     }
+}
+
+fn count_on(operations: &[Operation], background_cube: &Cube) -> u64 {
+    let disjoint_operations = calculate_disjoint_operations(operations, background_cube);
+
+    let mut count: u64 = 0;
+    for operation in disjoint_operations {
+        if operation.value {
+            count += operation.cube.size();
+        }
+    }
+    count
+}
+
+fn calculate_disjoint_operations(operations: &[Operation], background_cube: &Cube) -> Vec<Operation> {
+    // cubes in this vec are always disjoint and cut to truth_cube
+    let mut disjoint_ops: Vec<Operation> = Vec::new();
+    disjoint_ops.push(Operation { value: false, cube: background_cube.clone() });
+
+    for op in operations {
+        let mut keep: Vec<bool> = vec![true; disjoint_ops.len()];
+        let mut new_ops: Vec<Operation> = Vec::new();
+
+        for (i, old_op) in disjoint_ops.iter().enumerate() {
+            match op.cube.cut_to(&old_op.cube) {
+                None => {},
+                Some(cut_cube) => {
+                    // cut_cube.subsumed(old_op.cube) is always true after a cut
+                    if op.value == old_op.value {
+                        // pass
+                    }
+                    else if cut_cube.subsumes(&old_op.cube) {
+                        keep[i] = false;
+                        new_ops.push(Operation { value: op.value, cube: cut_cube })
+                    }
+                    else {  // !cut_cube.subsumes(old_op.cube) && op.value != old_op.value
+                        keep[i] = false;
+                        let cut_op = Operation { value: op.value, cube: cut_cube };
+                        let mut result = split_ops(&cut_op, &old_op);
+                        new_ops.append(&mut result);
+                    }
+                }
+            }
+        }
+
+        let mut keep_iter = keep.iter();
+        disjoint_ops.retain(|_| *keep_iter.next().unwrap());
+        disjoint_ops.append(&mut new_ops);
+    }
+
+    disjoint_ops
+}
+
+// assuming different values, new takes precedence, cubes intersect, new Cube is cut to the old Cube, cubes are not equal
+fn split_ops(new_op: &Operation, old_op: &Operation) -> Vec<Operation> {
+    let new_c = &new_op.cube;
+    let mut old_op = old_op.clone();
+    let mut result: Vec<Operation> = Vec::new();
+
+    if old_op.cube.x_a < new_c.x_a {
+        let mut split_op = old_op.clone();
+        split_op.cube.x_b = new_c.x_a - 1;
+        result.push(split_op);
+        old_op.cube.x_a = new_c.x_a;
+    }
+    if new_c.x_b < old_op.cube.x_b {
+        let mut split_op = old_op.clone();
+        split_op.cube.x_a = new_c.x_b + 1;
+        result.push(split_op);
+        old_op.cube.x_b = new_c.x_b;
+    }
+
+    if old_op.cube.y_a < new_c.y_a {
+        let mut split_op = old_op.clone();
+        split_op.cube.y_b = new_c.y_a - 1;
+        result.push(split_op);
+        old_op.cube.y_a = new_c.y_a;
+    }
+    if new_c.y_b < old_op.cube.y_b {
+        let mut split_op = old_op.clone();
+        split_op.cube.y_a = new_c.y_b + 1;
+        result.push(split_op);
+        old_op.cube.y_b = new_c.y_b;
+    }
+
+    if old_op.cube.z_a < new_c.z_a {
+        let mut split_op = old_op.clone();
+        split_op.cube.z_b = new_c.z_a - 1;
+        result.push(split_op);
+    }
+    if new_c.z_b < old_op.cube.z_b {
+        let mut split_op = old_op.clone();
+        split_op.cube.z_a = new_c.z_b + 1;
+        result.push(split_op);
+    }
+
+    result.push(new_op.clone());
+
+    result
 }
