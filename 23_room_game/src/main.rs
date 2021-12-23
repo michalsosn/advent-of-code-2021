@@ -4,7 +4,6 @@ use std::collections::BinaryHeap;
 use std::collections::HashSet;
 use std::io;
 use std::io::BufRead;
-use itertools::Itertools;
 
 
 fn main() {
@@ -19,7 +18,7 @@ fn main() {
 
 #[derive(Debug)]
 struct Input {
-    rooms: [[u8; 2]; 4],
+    rooms: [Vec<u8>; 4],
 }
 
 impl Input {
@@ -27,9 +26,10 @@ impl Input {
         let re = Regex::new(r"..#([A-D])#([A-D])#([A-D])#([A-D])#").unwrap();
         let first_char: i32 = 'A' as i32;
         let rooms: Vec<[u8; 4]> = io::stdin().lock().lines()
-            .skip(2).take(2)
+            .skip(2)
+            .map(|line| line.expect("error: unable to read line").to_string())
+            .take_while(|line| re.is_match(&line))
             .map(|line| {
-                let line = line.expect("error: unable to read line");
                 let captures = re.captures(&line).unwrap();
                 [
                     (captures.get(1).unwrap().as_str().chars().next().unwrap() as i32 - first_char + 1) as u8,
@@ -39,11 +39,11 @@ impl Input {
                 ]
             })
             .collect();
-        let rooms: [[u8; 2]; 4] = [
-            [rooms[0][0], rooms[1][0]],
-            [rooms[0][1], rooms[1][1]],
-            [rooms[0][2], rooms[1][2]],
-            [rooms[0][3], rooms[1][3]],
+        let rooms: [Vec<u8>; 4] = [
+            rooms.iter().map(|row| row[0]).collect(),
+            rooms.iter().map(|row| row[1]).collect(),
+            rooms.iter().map(|row| row[2]).collect(),
+            rooms.iter().map(|row| row[3]).collect(),
         ];
         Input {
             rooms
@@ -56,38 +56,23 @@ struct GameState {
     predicted_cost: u64,
     total_cost: u64,
     hallway: [u8; 11],
-    rooms: [[u8; 2]; 4],
-    room_to_type: [u8; 4],
-    type_to_room: [usize; 5],
-    prev: Box<Option<GameState>>,
+    rooms: [Vec<u8>; 4],
 }
 
 static TYPE_TO_COST: [u64; 5] = [0, 1, 10, 100, 1000];
+static ROOM_TO_TYPE: [u8; 4] = [1, 2, 3, 4];
+static TYPE_TO_ROOM: [usize; 5] = [0, 0, 1, 2, 3];
 
 impl GameState {
-    fn gen_init_states(init_rooms: &[[u8; 2]; 4]) -> Vec<GameState> {
-        let mut result: Vec<GameState> = Vec::new();
-        for perm in (1..=4).permutations(4) {
-            let type_to_room: [usize; 5] = [
-                0,
-                perm.iter().position(|&n| n == 1).unwrap(),
-                perm.iter().position(|&n| n == 2).unwrap(),
-                perm.iter().position(|&n| n == 3).unwrap(),
-                perm.iter().position(|&n| n == 4).unwrap(),
-            ];
-            let mut state = GameState {
-                predicted_cost: 0,
-                total_cost: 0,
-                hallway: [0; 11],
-                rooms: *init_rooms,
-                room_to_type: perm.try_into().unwrap(),
-                type_to_room,
-                prev: Box::new(None),
-            };
-            state.predicted_cost = state.predict_remaining_cost();
-            result.push(state);
-        }
-        result
+    fn init_state(init_rooms: &[Vec<u8>; 4]) -> GameState {
+        let mut state = GameState {
+            predicted_cost: 0,
+            total_cost: 0,
+            hallway: [0; 11],
+            rooms: init_rooms.clone(),
+        };
+        state.predicted_cost = state.predict_remaining_cost();
+        state
     }
 
     fn gen_following_states(&self) -> Vec<GameState> {
@@ -98,11 +83,8 @@ impl GameState {
             if typ == 0 {
                 continue;
             }
-            let room_ix = self.type_to_room[typ as usize];
+            let room_ix = TYPE_TO_ROOM[typ as usize];
             let room_hallway_ix = Self::room_to_hallway_ix(room_ix);
-            //if typ == 3 && room_ix == 2 && hallway_ix == 7 && self.rooms[2][0] == 0 {
-             //   println!("DUPA {:?} {} {}", self, self.can_enter_room(room_ix, typ), self.is_hallway_clear_exclusive(hallway_ix, room_hallway_ix));
-            //}
             if self.can_enter_room(room_ix, typ) && self.is_hallway_clear_exclusive(hallway_ix, room_hallway_ix) {
                 let mut cost = Self::hallway_cost(hallway_ix, room_hallway_ix, typ);
                 let mut new_state = self.clone();
@@ -112,12 +94,10 @@ impl GameState {
                     Some(room_inside_ix) => {
                         new_state.rooms[room_ix][room_inside_ix] = typ;
                         cost += Self::room_cost(room_inside_ix, typ);
-                        println!("Moving {} from hallway {} to room {} depth {} cost {}", typ, hallway_ix, room_ix, room_inside_ix, cost);
                     }
                 }
                 new_state.total_cost += cost;
                 new_state.predicted_cost = new_state.total_cost + new_state.predict_remaining_cost();
-                new_state.prev = Box::new(Some(self.clone()));
                 result.push(new_state);
             }
         }
@@ -129,12 +109,9 @@ impl GameState {
                 Some(room_inside_ix) => {
                     let room_hallway_ix = Self::room_to_hallway_ix(room_ix);
                     let typ = self.rooms[room_ix][room_inside_ix];
-                    if self.room_to_type[room_ix] == typ {
-                        if room_inside_ix == 1 {
-                            continue;
-                        }
-                        if room_inside_ix == 0 && self.rooms[room_ix][1] == typ {
-                            continue;
+                    if ROOM_TO_TYPE[room_ix] == typ {
+                        if self.rooms[room_ix].iter().skip(room_inside_ix + 1).all(|&t| t == typ) {
+                            continue
                         }
                     }
                     let room_cost = Self::room_cost(room_inside_ix, typ);
@@ -146,8 +123,6 @@ impl GameState {
                             let cost = room_cost + Self::hallway_cost(room_hallway_ix, hallway_ix, typ);
                             new_state.total_cost += cost;
                             new_state.predicted_cost = new_state.total_cost + new_state.predict_remaining_cost();
-                            new_state.prev = Box::new(Some(self.clone()));
-                            println!("Moving {} from room {} depth {} to hallway {} cost {}", typ, room_ix, room_inside_ix, hallway_ix, cost);
                             result.push(new_state);
                         }
                     }
@@ -164,7 +139,7 @@ impl GameState {
 
         for (hallway_ix, &typ) in self.hallway.iter().enumerate() {
             if typ > 0 {
-                let target_room_ix = self.type_to_room[typ as usize];
+                let target_room_ix = TYPE_TO_ROOM[typ as usize];
                 cost += Self::hallway_cost(hallway_ix, Self::room_to_hallway_ix(target_room_ix), typ)
                     + Self::room_cost(0, typ);
             }
@@ -173,7 +148,7 @@ impl GameState {
         for (room_ix, room) in self.rooms.iter().enumerate() {
             for (room_inside_ix, &typ) in room.iter().enumerate() {
                 if typ > 0 {
-                    let target_room_ix = self.type_to_room[typ as usize];
+                    let target_room_ix = TYPE_TO_ROOM[typ as usize];
                     if room_ix != target_room_ix {
                         cost += Self::hallway_cost(Self::room_to_hallway_ix(room_ix), Self::room_to_hallway_ix(target_room_ix), typ)
                             + Self::room_cost(room_inside_ix, typ)
@@ -189,29 +164,31 @@ impl GameState {
     }
 
     fn can_enter_room(&self, room: usize, typ: u8) -> bool {
-        (self.room_to_type[room] == typ) &&
-            (self.rooms[room][1] == typ || self.rooms[room][1] == 0) &&
-            (self.rooms[room][0] == 0)
+        if ROOM_TO_TYPE[room] != typ {
+            return false;
+        }
+        if self.rooms[room].iter().any(|&cur_type| cur_type != typ && cur_type != 0) {
+            return false;
+        }
+        self.rooms[room][0] == 0
     }
 
     fn bottom_empty_ix(&self, room: usize) -> Option<usize> {
-        if self.rooms[room][1] == 0 {
-            Some(1)
-        } else if self.rooms[room][0] == 0 {
-            Some(0)
-        } else {
-            None
+        for (i, &v) in self.rooms[room].iter().enumerate().rev() {
+            if v == 0 {
+                return Some(i);
+            }
         }
+        return None;
     }
 
     fn top_occupied_ix(&self, room: usize) -> Option<usize> {
-        if self.rooms[room][0] != 0 {
-            Some(0)
-        } else if self.rooms[room][1] != 0 {
-            Some(1)
-        } else {
-            None
+        for (i, &v) in self.rooms[room].iter().enumerate() {
+            if v != 0 {
+                return Some(i);
+            }
         }
+        return None;
     }
 
     fn is_hallway_clear_exclusive(&self, from: usize, to: usize) -> bool {
@@ -248,16 +225,12 @@ impl GameState {
     }
 
     fn room_cost(ix: usize, typ: u8) -> u64 {
-        if ix == 0 {
-            Self::type_cost(typ)
-        } else {
-            2 * Self::type_cost(typ)
-        }
+        (ix as u64 + 1) * Self::type_cost(typ)
     }
 
     fn is_final(&self) -> bool {
         for (room_ix, room) in self.rooms.iter().enumerate() {
-            let exp_type = self.room_to_type[room_ix];
+            let exp_type = ROOM_TO_TYPE[room_ix];
             if room.iter().any(|&cur_type| cur_type != exp_type) {
                 return false;
             }
@@ -279,47 +252,45 @@ impl PartialOrd for GameState {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Key {
+struct SeenKey {
     total_cost: u64,
     hallway: [u8; 11],
-    rooms: [[u8; 2]; 4]
+    rooms: [Vec<u8>; 4]
 }
 
-fn find_min_cost_state(init_rooms: &[[u8; 2]; 4]) -> Option<GameState> {
+fn find_min_cost_state(init_rooms: &[Vec<u8>; 4]) -> Option<GameState> {
     let mut min_cost: u64 = u64::MAX;
     let mut min_state: Option<GameState> = None;
     let mut queue: BinaryHeap<GameState> = BinaryHeap::new();
-    let mut seen: HashSet<Key> = HashSet::new();
+    let mut seen: HashSet<SeenKey> = HashSet::new();
 
-    let init_states = GameState::gen_init_states(init_rooms);
-    for state in init_states.into_iter().take(1) {
-        println!("init state {:?}", state);
-        queue.push(state);
-        while !queue.is_empty() {
-            let state = queue.pop().unwrap();
-            let key = Key { total_cost: state.total_cost, hallway: state.hallway, rooms: state.rooms };
+    let init_state = GameState::init_state(init_rooms);
+    queue.push(init_state);
 
-            if seen.contains(&key) {
-                continue;
-            }
-            seen.insert(key);
+    while !queue.is_empty() {
+        let state = queue.pop().unwrap();
+        let key = SeenKey { total_cost: state.total_cost, hallway: state.hallway, rooms: state.rooms.clone() };
 
-            println!("{:?}", state);
-            if state.total_cost >= min_cost {
-                continue;
-            }
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.insert(key);
 
-            let following_states = state.gen_following_states();
-            for following_state in following_states {
-                if following_state.is_final() {
-                    if following_state.total_cost < min_cost {
-                        min_cost = following_state.total_cost;
-                        min_state = Some(following_state);
-                        println!("found min cost {} in {:?}", min_cost, min_state);
-                    }
-                } else {
-                    queue.push(following_state);
+        // println!("{:?}", state);
+        if state.total_cost >= min_cost {
+            continue;
+        }
+
+        let following_states = state.gen_following_states();
+        for following_state in following_states {
+            if following_state.is_final() {
+                if following_state.total_cost < min_cost {
+                    min_cost = following_state.total_cost;
+                    min_state = Some(following_state);
+                    println!("found min cost {} in {:?}", min_cost, min_state);
                 }
+            } else {
+                queue.push(following_state);
             }
         }
     }
