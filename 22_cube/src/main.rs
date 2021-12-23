@@ -138,7 +138,7 @@ fn calculate_disjoint_operations(operations: &[Operation], background_cube: &Cub
                 Some(cut_cube) => {
                     keep[i] = false;
                     let cut_op = Operation { value: op.value, cube: cut_cube };
-                    let mut result = split_ops(&cut_op, &old_op);
+                    let mut result = split_operations(&cut_op, &old_op);
                     new_ops.append(&mut result);
                 }
             }
@@ -152,8 +152,8 @@ fn calculate_disjoint_operations(operations: &[Operation], background_cube: &Cub
     disjoint_ops
 }
 
-// assuming different values, new takes precedence, cubes intersect, new Cube is cut to the old Cube, cubes are not equal
-fn split_ops(new_op: &Operation, old_op: &Operation) -> Vec<Operation> {
+// assuming different values, new takes precedence, cubes intersect, new cube is cut to the old cube
+fn split_operations(new_op: &Operation, old_op: &Operation) -> Vec<Operation> {
     let new_c = &new_op.cube;
     let mut old_op = old_op.clone();
     let mut result: Vec<Operation> = Vec::new();
