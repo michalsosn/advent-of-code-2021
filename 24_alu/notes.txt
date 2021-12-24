@@ -1,0 +1,142 @@
+inp w       # w <- input
+mul x 0     #
+add x z     #
+mod x 26    #
+div z 1     #
+add x 11    # x = (z % 26) + 11
+eql x w     #
+eql x 0     # x = int(x != w)
+mul y 0     #
+add y 25    #
+mul y x     #
+add y 1     # y = (25 * x) + 1
+mul z y     # z *= y
+mul y 0     #
+add y w     #
+add y 3     #
+mul y x     # y = (w + 3) * x
+add z y     # z += y
+
+inp w
+mul x 0
+add x z
+mod x 26
+div z 1   <- this one is either 1 or 26
+add x 14! <- varies
+eql x w
+eql x 0
+mul y 0
+add y 25
+mul y x
+add y 1
+mul z y
+mul y 0
+add y w
+add y 7!  <- varies
+mul y x
+add z y
+
+In the input, a BLOCK of instructions is repeated 14 times. 3 lit values (A, B, C) change between blocks. 
+Only z is passed between blocks, w is reset by INP w and x, y are reset by MUL x/y 0.
+
+BLOCK[A, B, C] (w0, z0) -> z1
+inp w       # w <- input        # w = w0
+mul x 0     #
+add x z     #
+mod x 26    # x = z % 26        # x = z0 % 26
+div z C     # z /= C            # z = (z0 / C)
+add x A     # x = x + A         # x = z0 % 26 + A
+eql x w     #
+eql x 0     # x = int(x != w)   # x = int(z0 % 26 + A != w0)
+mul y 0     #
+add y 25    #
+mul y x     #
+add y 1     # y = (25 * x) + 1  # y = 25 * int(z0 % 26 + A != w0) + 1
+mul z y     # z *= y            # z = (z0 / C) * (25 * int(z0 % 26 + A != w0) + 1)
+mul y 0     #
+add y w     #
+add y B     #
+mul y x     # y = (w + B) * x   # y = (w0 + B) * int(z0 % 26 + A != w0)
+add z y     # z += y
+
+# z1 = (z0 / C) * (25 * int(z0 % 26 + A != w0) + 1) + (w0 + B) * int(z0 % 26 + A != w0)
+
+# NEQ = int(z0 % 26 + A != w0)
+# z1 = (z0 / C) * (25 NEQ + 1) + (w0 + B) * NEQ
+
+# z1 = (z0 / C) * 26 + w0 + B  | w0 != z0 % 26 + A
+# z1 = (z0 / C)                | w0 == z0 % 26 + A
+
+# BLOCKS with C=1  can either multiply z by 26 and add w1+B<26 [when w1 does not match w0 + A] or keep z
+# BLOCKS with C=26 can either divide and multiply z by 26 and add w1+B (replacing recently added w0+b with w1+b) [when w1 does not match w0+A] or divide z by 26 (dropping last w0+B)
+# we can imagine each multiplication and division by 26 as adding or dropping a level from a stack of a mod26
+# In my input I have 7 blocks with C=1 and C=26, so a balanced number 
+# it seems that my C=1 blocks have such A values, that I can never hope to match w0 = z0%26 + A with any w0 in [1; 9] because A are always >=10 in them
+# so C=1 will always add a level to my stack of mod26. I must therefore ensure that I div26 level in all C=26 BLOCKS. It seems that A params in all these blocks make it possible.
+
+My blocks:
+                    w == z % 26 +  A ? z : 26*z + w + B      # [0]
+BLOCK[ 11,  3,   1] w == z % 26 + 11 ? z : 26*z + w + 3      # [0; w0 + 3] if w0 != 11 else [0]
+BLOCK[ 14,  7,   1] w == z % 26 + 14 ? z : 26*z + w + 7      # [0; w0 + 3; w1 + 7] if w1 != w0+3+14
+BLOCK[ 13,  1,   1] w == z % 26 + 13 ? z : 26*z + w + 1      # [0; w0 + 3; w1 + 7; w2 + 1] if w2 != w1+7+13 
+BLOCK[ -4,  6,  26] w == z % 26 -  4 ? z/26 : rnd(z) + w + 6 # [0; w0 + 3; w1 + 7; w3 + 6] if w3 != w2+1-4 else [0; w0 + 3; w1 + 7]
+BLOCK[ 11, 14,   1]
+
+BLOCK[ 10,  7,   1]
+BLOCK[ -4,  9,  26]
+BLOCK[-12,  9,  26]
+BLOCK[ 10,  6,   1]
+BLOCK[-11,  4,  26]
+
+BLOCK[ 12,  0,   1]
+BLOCK[ -1,  7,  26]
+BLOCK[  0,  12, 26]
+BLOCK[-11,  1,  26]
+
+
+## LARGEST INPUT (start with 9 and later lower to the highest value, that still makes it possible to drop a level in the matching C=26 block): 
+BLOCK[ 11,  3,   1] 9 # [12]
+BLOCK[ 14,  7,   1] 2 # [12; 9]
+BLOCK[ 13,  1,   1] 9 # [12; 9; 10]
+BLOCK[ -4,  6,  26] 6 # [12; 9]
+BLOCK[ 11, 14,   1] 7 # [12; 9; 21] 
+
+BLOCK[ 10,  7,   1] 6 # [12; 9; 21; 13]
+BLOCK[ -4,  9,  26] 9 # [12; 9; 21]
+BLOCK[-12,  9,  26] 9 # [12; 9]
+BLOCK[ 10,  6,   1] 9 # [12; 9; 15]
+BLOCK[-11,  4,  26] 4 # [12; 9]
+
+BLOCK[ 12,  0,   1] 9 # [12; 9; 9]
+BLOCK[ -1,  7,  26] 8 # [12; 9]
+BLOCK[  0,  12, 26] 9 # [12]
+BLOCK[-11,  1,  26] 1 # []
+
+92967699949891
+[9, 2, 9, 6, 7, 6, 9, 9, 9, 4, 9, 8, 9, 1]  # verified by the program that it ends with z=0
+
+
+## SMALLEST INPUT (start with 1 and later increase to the lowest value, that still makes it possible to drop a level in the mathcing C=26 block):
+BLOCK[ 11,  3,   1] 9 # [12]
+BLOCK[ 14,  7,   1] 1 # [12, 8]
+BLOCK[ 13,  1,   1] 4 # [12, 8, 5]
+BLOCK[ -4,  6,  26] 1 # [12, 8]
+BLOCK[ 11, 14,   1] 1 # [12, 8, 15]
+
+BLOCK[ 10,  7,   1] 1 # [12, 8, 15, 8]
+BLOCK[ -4,  9,  26] 4 # [12, 8, 15]
+BLOCK[-12,  9,  26] 3 # [12, 8]
+BLOCK[ 10,  6,   1] 6 # [12, 8, 12]
+BLOCK[-11,  4,  26] 1 # [12, 8]
+
+BLOCK[ 12,  0,   1] 2 # [12, 8, 2]
+BLOCK[ -1,  7,  26] 1 # [12, 8]
+BLOCK[  0,  12, 26] 8 # [12]
+BLOCK[-11,  1,  26] 1 # []
+
+91411143612181
+[9, 1, 4, 1, 1, 1, 4, 3, 6, 1, 2, 1, 8, 1]  # verified by the program that it ends with z=0
+
+
+I didn't implement a program to do it, but it should be feasible now that I went through the steps myself
+
